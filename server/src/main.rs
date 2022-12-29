@@ -116,7 +116,8 @@ fn main() {
             }
         }
         
-    server.send_packets().unwrap();
-    std::thread::sleep(Duration::from_millis(50));
+        server.send_packets().unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        
     }
 }
