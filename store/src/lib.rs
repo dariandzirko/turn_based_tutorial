@@ -15,11 +15,13 @@ pub enum Tile {
 //Struct for storing player related data
 //In tic-tac-toe the only thing we need is the name and piece
 //the player will be playing
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Player {
     pub name: String,
     pub piece: Tile,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Stage {
     PreGame,
     InGame,
@@ -58,6 +60,7 @@ impl Default for GameState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum EndGameReason {
     //In tic-tac-toe it doesn't make sense to keep playing wehn of the players disconnects
     //Note that it might make sense to keep playing in some other game (Team Fight Tactis for instance)
@@ -80,7 +83,7 @@ impl GameState {
     pub fn validate(&self, event: &GameEvent) -> bool {
         use GameEvent::*;
         match event {
-            BeginGame(goes_first) => {
+            BeginGame { goes_first } => {
                 //Check that player supposed to go first exists
                 if !self.players.contains_key(goes_first) {
                     return false;
@@ -108,7 +111,7 @@ impl GameState {
             }
             PlayerDisconnected { player_id } => {
                 //Check player exists
-                if !self.players.constains_key(player_id) {
+                if !self.players.contains_key(player_id) {
                     return false;
                 }
             }
@@ -170,7 +173,7 @@ impl GameState {
                 self.board[*at] = piece;
                 self.active_player_id = self
                     .players
-                    .keys
+                    .keys()
                     .find(|id| *id != player_id)
                     .unwrap()
                     .clone();
@@ -178,6 +181,14 @@ impl GameState {
         }
 
         self.history.push(valid_event.clone());
+    }
+
+    pub fn get_player_tile(&self, player_id: &PlayerId) -> Option<Tile> {
+        if let Some(player) = self.players.get(player_id) {
+            return Some(player.piece);
+        }
+
+        None
     }
 
     //Determines if someone has won the game
@@ -193,20 +204,26 @@ impl GameState {
         let diag2: [usize; 3] = [2, 4, 6];
 
         for arr in [row1, row2, row3, col1, col2, col3, diag1, diag2] {
-            //Read the tiles from the board 
-            let tiles: [Tiles: 3] = self.board[arr[0]], self.board[arr[1]], self.board[arr[2]];
+            //Read the tiles from the board
+            let tiles: [Tile; 3] = [self.board[arr[0]], self.board[arr[1]], self.board[arr[2]]];
 
-            let all_are_the_same = tiles.get(0).map(|first| tiles.iter().all(|x| x == first)).unwrap_or(true);
+            let all_are_the_same = tiles
+                .get(0)
+                .map(|first| tiles.iter().all(|x| x == first))
+                .unwrap_or(true);
 
             if all_are_the_same {
                 //Determine which of the players won
-                if let Some((winner, _)) = self.players.iter().find(|(_, player)| player.piece == self.board[arr[0]])
+                if let Some((winner, _)) = self
+                    .players
+                    .iter()
+                    .find(|(_, player)| player.piece == self.board[arr[0]])
                 {
                     return Some(*winner);
                 }
             }
         }
-        
+
         None
     }
 }

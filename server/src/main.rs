@@ -1,7 +1,12 @@
-use log::{info, trace};
-use renet::{RenetConnectionConfig, RenetServer, ServerAuthentication, ServerConf};
+use log::{info, trace, warn};
+use renet::{
+    RenetConnectionConfig, RenetServer, ServerAuthentication, ServerConfig, ServerEvent,
+    NETCODE_USER_DATA_BYTES,
+};
 use std::net::{SocketAddr, UdpSocket};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime};
+use store::EndGameReason;
 
 //Only clients that can provide the same PROTOCOL_ID that the server is using
 //will be able to connect. This can be used to make sure players use the most
@@ -11,10 +16,20 @@ pub const PROTOCOL_ID: u64 = 1208;
 //If you add those up you get 1208
 //It is not to do the PROTOCOL_ID like this but it is fun
 
+//Utility function for extracting a players name from renet user data
+fn name_from_user_data(user_data: &[u8; NETCODE_USER_DATA_BYTES]) -> String {
+    let mut buffer = [0u8; 8];
+    buffer.copy_from_slice(&user_data[0..8]);
+    let mut len = u64::from_le_bytes(buffer) as usize;
+    len = len.min(NETCODE_USER_DATA_BYTES - 8);
+    let data = user_data[8..len + 8].to_vec();
+    String::from_utf8(data).unwrap()
+}
+
 fn main() {
     env_logger::init();
 
-    let server_addr: SocketAddr = "127.0.0.1:5000".parse.unwrap();
+    let server_addr: SocketAddr = "127.0.0.1:5000".parse().unwrap();
     let mut server: RenetServer = RenetServer::new(
         //Pass the current time to renet, so it can use it to order messages
         SystemTime::now()
@@ -33,7 +48,9 @@ fn main() {
 
     trace!("🕹  TicTacTussle server listening on {}", server_addr);
 
+    let mut game_state = store::GameState::default();
     let mut last_update = Instant::now();
+
     loop {
         //Update server time
         let now = Instant::now();
@@ -44,7 +61,7 @@ fn main() {
         while let Some(event) = server.get_event() {
             match event {
                 ServerEvent::ClientConnected(id, user_data) => {
-                    //Tell the recently joined player about the other player 
+                    //Tell the recently joined player about the other player
                     for (player_id, player) in game_state.players.iter() {
                         let event = store::GameEvent::PlayerJoined {
                             player_id: *player_id,
@@ -57,16 +74,16 @@ fn main() {
                     let event = store::GameEvent::PlayerJoined {
                         player_id: id,
                         name: name_from_user_data(&user_data),
-                    }
+                    };
                     game_state.consume(&event);
 
-                    //Tell all players that a new player has joined 
+                    //Tell all players that a new player has joined
                     server.broadcast_message(0, bincode::serialize(&event).unwrap());
 
                     info!("🎉 Client {} connected.", id);
 
-                    //In TicTacTussle the game can begin once two players have joined 
-                    if game_state.players.len() = 2 {
+                    //In TicTacTussle the game can begin once two players have joined
+                    if game_state.players.len() == 2 {
                         let event = store::GameEvent::BeginGame { goes_first: id }; //Doesn't this mean the second player goes first?
                         game_state.consume(&event);
                         server.broadcast_message(0, bincode::serialize(&event).unwrap());
@@ -74,13 +91,13 @@ fn main() {
                     }
                 }
                 ServerEvent::ClientDisconnected(id) => {
-                    //First consume a disconnect event 
-                    let event = store::GameEvent::PlayerDisconnected { player_id };
+                    //First consume a disconnect event
+                    let event = store::GameEvent::PlayerDisconnected { player_id: id };
                     game_state.consume(&event);
                     server.broadcast_message(0, bincode::serialize(&event).unwrap());
                     info!("🎉 Client {} disconnected.", id);
 
-                    //Then end the game, since tic-tac-toe can't go on with a single player 
+                    //Then end the game, since tic-tac-toe can't go on with a single player
                     let event = store::GameEvent::EndGame {
                         reason: EndGameReason::PlayerLeft { player_id: id },
                     };
@@ -102,7 +119,7 @@ fn main() {
                         trace!("Player {} sent:\n\t{:#?}", client_id, event);
                         server.broadcast_message(0, bincode::serialize(&event).unwrap());
 
-                        //Determine if a player has won the game 
+                        //Determine if a player has won the game
                         if let Some(winner) = game_state.determine_winner() {
                             let event = store::GameEvent::EndGame {
                                 reason: store::EndGameReason::PlayerWon { winner },
@@ -115,9 +132,8 @@ fn main() {
                 }
             }
         }
-        
+
         server.send_packets().unwrap();
-        std::thread::sleep(Duration::from_millis(50));
-        
+        thread::sleep(Duration::from_millis(50));
     }
 }
